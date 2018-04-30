@@ -24,9 +24,12 @@ tf.flags.DEFINE_string('test_file', 'test.txt', 'train raw file')
 tf.flags.DEFINE_string('data_dir', 'data', 'data directory')
 tf.flags.DEFINE_string('save_dir', 'save', 'model saved directory')
 tf.flags.DEFINE_string('log_dir', 'log', 'log info directiory')
-tf.flags.DEFINE_string('pre_trained_vec', None, 'using pre trained word embeddings, npy file format')
-tf.flags.DEFINE_string('init_from', None, 'continue training from saved model at this path')
+#tf.flags.DEFINE_string('pre_trained_vec', None, 'using pre trained word embeddings, npy file format')
+#tf.flags.DEFINE_string('init_from', None, 'continue training from saved model at this path')
 tf.flags.DEFINE_integer('save_steps', 1000, 'num of train steps for saving model')
+tf.flags.DEFINE_integer('interaction_rounds',10,'num of the document interaction rounds')
+tf.flags.DEFINE_string('embedding_file','vectors_50.bin','the word embedding file')
+tf.flags.DEFINE_string('log_file','log.txt','log of program')
 
 FLAGS = tf.flags.FLAGS
 FLAGS._parse_flags()
@@ -36,27 +39,28 @@ for attr, value in sorted(FLAGS.__flags.items()):
 
 def train():
 	data_loader = InputHelper()
-	data_loader.create_dictionary(FLAGS.data_dir+'/'+FLAGS.train_file, FLAGS.data_dir+'/')
-	data_loader.create_batches(FLAGS.data_dir+'/'+FLAGS.train_file, FLAGS.batch_size, FLAGS.sequence_length)
-	FLAGS.vocab_size = data_loader.vocab_size
-	FLAGS.n_classes = data_loader.n_classes
-	FLAGS.num_batches = data_loader.num_batches
+        data_loader.load_embedding(FLAGS.embedding_file,FLAGS.embedding_size)
+        train_data = data_loader.load_data(FLAGS.data_dir+'/'+FLAGS.train_file, FLAGS.data_dir+'/',FLAGS.interaction_rounds,FLAGS.sequence_length)
+#	data_loader.create_batches(FLAGS.data_dir+'/'+FLAGS.train_file, FLAGS.batch_size, FLAGS.sequence_length)
+	FLAGS.vocab_size = len(data_loader.word2idx)
+	FLAGS.n_classes = len(data_loader.label_dictionary)
+        FLAGS.num_batches = data_loader.num_batches
 
 	test_data_loader = InputHelper()
 	test_data_loader.load_dictionary(FLAGS.data_dir+'/dictionary')
 	test_data_loader.create_batches(FLAGS.data_dir+'/'+FLAGS.test_file, 100, FLAGS.sequence_length)
 
-	if FLAGS.pre_trained_vec:
-		embeddings = np.load(FLAGS.pre_trained_vec)
-		print embeddings.shape
-		FLAGS.vocab_size = embeddings.shape[0]
-		FLAGS.embedding_size = embeddings.shape[1]
+	#if FLAGS.pre_trained_vec:
+	#	embeddings = np.load(FLAGS.pre_trained_vec)
+	#	print embeddings.shape
+	#	FLAGS.vocab_size = embeddings.shape[0]
+	#	FLAGS.embedding_size = embeddings.shape[1]
 
-	if FLAGS.init_from is not None:
-		assert os.path.isdir(FLAGS.init_from), '{} must be a directory'.format(FLAGS.init_from)
-		ckpt = tf.train.get_checkpoint_state(FLAGS.init_from)
-		assert ckpt,'No checkpoint found'
-		assert ckpt.model_checkpoint_path,'No model path found in checkpoint'
+	#if FLAGS.init_from is not None:
+	#	assert os.path.isdir(FLAGS.init_from), '{} must be a directory'.format(FLAGS.init_from)
+	#	ckpt = tf.train.get_checkpoint_state(FLAGS.init_from)
+	#	assert ckpt,'No checkpoint found'
+	#	assert ckpt.model_checkpoint_path,'No model path found in checkpoint'
 
 	# Define specified Model
 	model = BiRNN(embedding_size=FLAGS.embedding_size, rnn_size=FLAGS.rnn_size, layer_size=FLAGS.layer_size,	
@@ -79,13 +83,13 @@ def train():
 		saver = tf.train.Saver(tf.global_variables())
 
 		# using pre trained embeddings
-		if FLAGS.pre_trained_vec:
-			sess.run(model.embedding.assign(embeddings))
-			del embeddings
+		#if FLAGS.pre_trained_vec:
+		#	sess.run(model.embedding.assign(embeddings))
+		#	del embeddings
 
-		# restore model
-		if FLAGS.init_from is not None:
-			saver.restore(sess, ckpt.model_checkpoint_path)
+		## restore model
+		#if FLAGS.init_from is not None:
+		#	saver.restore(sess, ckpt.model_checkpoint_path)
 
 		total_steps = FLAGS.num_epochs * FLAGS.num_batches
 		for e in xrange(FLAGS.num_epochs):
