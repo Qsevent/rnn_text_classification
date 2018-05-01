@@ -19,6 +19,8 @@ class InputHelper():
             self.idx2word = {}
             self.label_dictionary = {}
             self.log = Logger('temp_log.txt')
+            self.batch_index = []            
+	    self.num_batches = 0
         def load_embedding(self,embedding_file,embedding_size):
             '''
             load embedding file
@@ -50,7 +52,7 @@ class InputHelper():
                     self.idx2word[len(self.word2idx)]=line[0]
                 count += 1
             self.log.info('load embedding finish, %d words in total '%(words_num+2))
-
+            
         def load_data(self,data_file,save_dir,interaction_rounds,sequence_length):
             '''
             create data id though embeding list
@@ -183,7 +185,7 @@ class InputHelper():
             one_batch_whole_interaction = math.ceil(batch_size*1.0/interaction_rounds)
             batch_size = int(one_batch_whole_interaction * interaction_rounds)
             num_batches = int(math.floor(len(data)*1.0/batch_size))
-
+            self.num_batches = num_batches
             data = data[:num_batches*batch_size]
             label = label[:num_batches*batch_size]
 
@@ -209,32 +211,32 @@ class InputHelper():
 
 
 
-	def create_batches(self, train_file, batch_size, sequence_length):
+#	def create_batches(self, train_file, batch_size, sequence_length):
 
-		self.x_data = []
-		self.y_data = []
-		padding_index = self.vocab_size - 1
-		for line in open(train_file):
-			line = line.decode('utf-8')
-			text, label = line.rstrip().split('\t')
-			tokens = text.split(' ')
-			seq_ids = [self.token_dictionary.get(token) for token in tokens if self.token_dictionary.get(token) is not None]
-			seq_ids = seq_ids[:sequence_length]
-			for _ in xrange(len(seq_ids), sequence_length):
-				seq_ids.append(padding_index)
+#		self.x_data = []
+#		self.y_data = []
+#		padding_index = self.vocab_size - 1
+#		for line in open(train_file):
+#			line = line.decode('utf-8')
+#			text, label = line.rstrip().split('\t')
+#			tokens = text.split(' ')
+#			seq_ids = [self.token_dictionary.get(token) for token in tokens if self.token_dictionary.get(token) is not None]
+#			seq_ids = seq_ids[:sequence_length]
+#			for _ in xrange(len(seq_ids), sequence_length):
+#				seq_ids.append(padding_index)
 
-			self.x_data.append(seq_ids)
-			self.y_data.append(self.label_dictionary.get(label))
+#			self.x_data.append(seq_ids)
+#			self.y_data.append(self.label_dictionary.get(label))
 
-		self.num_batches = len(self.x_data) / batch_size
-		self.x_data = self.x_data[:self.num_batches * batch_size]
-		self.y_data = self.y_data[:self.num_batches * batch_size]
+#		self.num_batches = len(self.x_data) / batch_size
+#		self.x_data = self.x_data[:self.num_batches * batch_size]
+#		self.y_data = self.y_data[:self.num_batches * batch_size]
 
-		self.x_data = np.array(self.x_data, dtype=int)
-		self.y_data = np.array(self.y_data, dtype=int)
-		self.x_batches = np.split(self.x_data.reshape(batch_size, -1), self.num_batches, 1)
-		self.y_batches = np.split(self.y_data.reshape(batch_size, -1), self.num_batches, 1)
-		self.pointer = 0
+#		self.x_data = np.array(self.x_data, dtype=int)
+#		self.y_data = np.array(self.y_data, dtype=int)
+#		self.x_batches = np.split(self.x_data.reshape(batch_size, -1), self.num_batches, 1)
+#		self.y_batches = np.split(self.y_data.reshape(batch_size, -1), self.num_batches, 1)
+#		self.pointer = 0
 
 
 
@@ -258,18 +260,18 @@ class InputHelper():
 		self.batch_index = np.random.permutation(self.num_batches)
 		self.pointer = 0
 
-	def transform_raw(self, text, sequence_length):
+#	def transform_raw(self, text, sequence_length):
 
-		if not isinstance(text, unicode):
-			text = text.decode('utf-8')
+#		if not isinstance(text, unicode):
+#			text = text.decode('utf-8')
 
-		x = [self.token_dictionary.get(token) for token in text]
-		x = x[:sequence_length]
-		padding_index = self.vocab_size - 1
-		for _ in xrange(len(x), sequence_length):
-			x.append(padding_index)
+#		x = [self.token_dictionary.get(token) for token in text]
+#		x = x[:sequence_length]
+#		padding_index = self.vocab_size - 1
+#		for _ in xrange(len(x), sequence_length):
+#			x.append(padding_index)
 
-		return x
+#		return x
 
 
 if __name__ == '__main__':
@@ -277,4 +279,6 @@ if __name__ == '__main__':
         data_loader.load_embedding('data/test_embedding.bin',3)
         da,la =data_loader.load_data('data/t.txt','data/',4,5)
         x_batch,y_batch = data_loader.generate_batches((da,la),4,4)
+        print data_loader.num_batches   
+        print data_loader.batch_index
         x,y = data_loader.next_batch(x_batch,y_batch)

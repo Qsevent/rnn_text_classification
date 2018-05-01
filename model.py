@@ -8,7 +8,7 @@ class BiRNN(object):
 	用于文本分类的双向RNN
 	"""
 	def __init__(self, embedding_size, rnn_size, layer_size, 
-		vocab_size, attn_size, sequence_length, n_classes, grad_clip, learning_rate):
+		vocab_size, attn_size, sequence_length, n_classes, interaction_rounds, embeddings, grad_clip, learning_rate):
 		"""
 		- embedding_size: word embedding dimension
 		- rnn_size : hidden state dimension
@@ -25,6 +25,12 @@ class BiRNN(object):
 		self.input_data = tf.placeholder(tf.int32, shape=[None, sequence_length], name='input_data')
 		self.targets = tf.placeholder(tf.float32, shape=[None, n_classes], name='targets')
 
+                #my input_data shape:(batch_size/interaction_rounds, interaction_rounds, sequence_length)
+                #self.input_data = tf.placeholder(tf.int32, shape=[None, interaction_rounds, sequence_length], name='input_data')
+                #self.label_data = tf.placeholder(tf.int32, shape=[None, interaction_rounds, n_classes], name='input_label')
+
+
+                # multi layer rnn
 		# 定义前向RNN Cell
 		with tf.name_scope('fw_rnn'), tf.variable_scope('fw_rnn'):
 			print tf.get_variable_scope().name
@@ -35,16 +41,24 @@ class BiRNN(object):
 		with tf.name_scope('bw_rnn'), tf.variable_scope('bw_rnn'):
 			print tf.get_variable_scope().name
 			lstm_bw_cell_list = [tf.contrib.rnn.LSTMCell(rnn_size) for _ in xrange(layer_size)]
-			lstm_bw_cell_m = tf.contrib.rnn.DropoutWrapper(tf.contrib.rnn.MultiRNNCell(lstm_fw_cell_list), output_keep_prob=self.output_keep_prob)
+			lstm_bw_cell_m = tf.contrib.rnn.DropoutWrapper(tf.contrib.rnn.MultiRNNCell(lstm_bw_cell_list), output_keep_prob=self.output_keep_prob)
 
 
 		with tf.device('/cpu:0'):
-			embedding = tf.Variable(tf.truncated_normal([vocab_size, embedding_size], stddev=0.1), name='embedding')
-			inputs = tf.nn.embedding_lookup(embedding, self.input_data)
+                        # my embedding
+                       # if embeddings != None:
+                       #     embedding = tf.Variable(np.array(embeddings,dtype=float),name='embedding')
+                       #     inputs = tf.nn.embedding_lookup(embedding, self.input_data)
+                       # else:
+			    embedding = tf.Variable(tf.truncated_normal([vocab_size, embedding_size], stddev=0.1), name='embedding')
+			    inputs = tf.nn.embedding_lookup(embedding, self.input_data)
+
+                # my input
+                #inputs = tf.transpose(tf.reshape(inputs,[-1,sequence_length,rnn_size]),[1,0,2])
+                #inputs = tf.reshape(inputs,[-1,rnn_size])
 
 		# self.input_data shape: (batch_size , sequence_length)
 		# inputs shape : (batch_size , sequence_length , rnn_size)
-
 		# bidirection rnn 的inputs shape 要求是(sequence_length, batch_size, rnn_size)
 		# 因此这里需要对inputs做一些变换
 		# 经过transpose的转换已经将shape变为(sequence_length, batch_size, rnn_size)
@@ -80,23 +94,58 @@ class BiRNN(object):
 			self.final_output = tf.reduce_sum(outputs * alpha_trans, 0)
 
 		print self.final_output.shape
-		# outputs shape: (sequence_length, batch_size, 2*rnn_size)
-		fc_w = tf.Variable(tf.truncated_normal([2*rnn_size, n_classes], stddev=0.1), name='fc_w')
-		fc_b = tf.Variable(tf.zeros([n_classes]), name='fc_b')
+                
+                # define forword RNN Cell for interaction
+		with tf.name_scope('fw_i_rnn'), tf.variable_scope('fw_i_rnn'):
+			print tf.get_variable_scope().name
+			lstm_ifw_cell_list = [tf.contrib.rnn.LSTMCell(2*rnn_size) for _ in xrange(layer_size)]
+			lstm_ifw_cell_m = tf.contrib.rnn.DropoutWrapper(tf.contrib.rnn.MultiRNNCell(lstm_ifw_cell_list), output_keep_prob=self.output_keep_prob)
 
-		#self.final_output = outputs[-1]
+		# define backword RNN Cell for interaction
+		with tf.name_scope('bw_i_rnn'), tf.variable_scope('bw_i_rnn'):
+			print tf.get_variable_scope().name
+			lstm_ibw_cell_list = [tf.contrib.rnn.LSTMCell(2*rnn_size) for _ in xrange(layer_size)]
+			lstm_ibw_cell_m = tf.contrib.rnn.DropoutWrapper(tf.contrib.rnn.MultiRNNCell(lstm_ibw_cell_list), output_keep_prob=self.output_keep_prob)
 
-		# 用于分类任务, outputs取最终一个时刻的输出
-		self.logits = tf.matmul(self.final_output, fc_w) + fc_b
+                sentence_input = tf.reshape(self.final_output,[-1,interaction_rounds,2*rnn_size])
+                sentence_input = tf.transpose(sentence_input,[1,0,2])
+                sentence_input = tf.reshape(sentence_input,[-1,2*rnn_size])
+                sentence_input = tf.split(sentence_input,interaction_rounds)
+                # sentence_outputs shape (interaction_rounds, batch_size/interaction_rounds, 4*rnn_size)
+		with tf.name_scope('bi_i_rnn'), tf.variable_scope('bi_i_rnn'):
+			sentence_outputs, _, _ = tf.contrib.rnn.static_bidirectional_rnn(lstm_ifw_cell_m, lstm_ibw_cell_m, sentence_input, dtype=tf.float32)
+                # dirction use softmax to classify
+                sentence_outputs_s = tf.reshape(sentence_outputs,[-1,4*rnn_size])
+		fc_w = tf.Variable(tf.truncated_normal([4*rnn_size, n_classes], stddev=0.1), name='ifc_w')
+		fc_b = tf.Variable(tf.zeros([n_classes]), name='ifc_b')
+		self.logits = tf.matmul(sentence_outputs_s, fc_w) + fc_b
 		self.prob = tf.nn.softmax(self.logits)
-
 		self.cost = tf.losses.softmax_cross_entropy(self.targets, self.logits)
 		tvars = tf.trainable_variables()
 		grads, _ = tf.clip_by_global_norm(tf.gradients(self.cost, tvars), grad_clip)
 
+                # dirction use softmax to classify
 		optimizer = tf.train.AdamOptimizer(learning_rate)
 		self.train_op = optimizer.apply_gradients(zip(grads, tvars))
 		self.accuracy = tf.reduce_mean(tf.cast(tf.equal(tf.argmax(self.targets, axis=1), tf.argmax(self.prob, axis=1)), tf.float32))
+		
+                # outputs shape: (sequence_length, batch_size, 2*rnn_size)
+		#fc_w = tf.Variable(tf.truncated_normal([2*rnn_size, n_classes], stddev=0.1), name='fc_w')
+		#fc_b = tf.Variable(tf.zeros([n_classes]), name='fc_b')
+
+		#self.final_output = outputs[-1]
+
+		# 用于分类任务, outputs取最终一个时刻的输出
+		#self.logits = tf.matmul(self.final_output, fc_w) + fc_b
+		#self.prob = tf.nn.softmax(self.logits)
+
+		#self.cost = tf.losses.softmax_cross_entropy(self.targets, self.logits)
+		#tvars = tf.trainable_variables()
+		#grads, _ = tf.clip_by_global_norm(tf.gradients(self.cost, tvars), grad_clip)
+
+		#optimizer = tf.train.AdamOptimizer(learning_rate)
+		#self.train_op = optimizer.apply_gradients(zip(grads, tvars))
+		#self.accuracy = tf.reduce_mean(tf.cast(tf.equal(tf.argmax(self.targets, axis=1), tf.argmax(self.prob, axis=1)), tf.float32))
 
 	def inference(self, sess, labels, inputs):
 
@@ -107,4 +156,5 @@ class BiRNN(object):
 
 
 if __name__ == '__main__':
-	model = BiRNN(128, 128, 2, 100, 256, 50, 30, 5, 0.001)
+    em = [0.123,0.3243,0.435435,0.43564,0.345345,0.345345,0.32423,0.56464,0.24234,0.3454354]
+    model = BiRNN(10, 10, 2, 5, 20, 5, 3,4,em,5, 0.001)
